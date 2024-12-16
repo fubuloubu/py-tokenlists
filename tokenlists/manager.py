@@ -1,3 +1,4 @@
+from json import JSONDecodeError
 from typing import Iterator, List, Optional
 
 import requests
@@ -15,7 +16,7 @@ class TokenListManager:
         # Load all the ones cached on disk
         self.installed_tokenlists = {}
         for path in self.cache_folder.glob("*.json"):
-            tokenlist = TokenList.parse_file(path)
+            tokenlist = TokenList.model_validate_json(path.read_text())
             self.installed_tokenlists[tokenlist.name] = tokenlist
 
         self.default_tokenlist = config.DEFAULT_TOKENLIST
@@ -42,13 +43,18 @@ class TokenListManager:
         # Load and store the tokenlist
         response = requests.get(uri)
         response.raise_for_status()
-        tokenlist = TokenList.parse_obj(response.json())
+        try:
+            response_json = response.json()
+        except JSONDecodeError as err:
+            raise ValueError(f"Invalid response: {response.text}") from err
+
+        tokenlist = TokenList.model_validate(response_json)
         self.installed_tokenlists[tokenlist.name] = tokenlist
 
         # Cache it on disk for later instances
         self.cache_folder.mkdir(exist_ok=True)
         token_list_file = self.cache_folder.joinpath(f"{tokenlist.name}.json")
-        token_list_file.write_text(tokenlist.json())
+        token_list_file.write_text(tokenlist.model_dump_json())
 
         return tokenlist.name
 
@@ -115,12 +121,14 @@ class TokenListManager:
         matching_tokens = list(token_iter)
         if len(matching_tokens) == 0:
             raise ValueError(
-                f"Token with symbol '{symbol}' does not exist" f" within '{tokenlist}' token list."
+                f"Token with symbol '{symbol}' does not exist"
+                f" within '{tokenlist.name}' token list."
             )
 
         elif len(matching_tokens) > 1:
             raise ValueError(
-                f"Multiple tokens with symbol '{symbol}'" f" found in '{tokenlist}' token list."
+                f"Multiple tokens with symbol '{symbol}'"
+                f" found in '{tokenlist.name}' token list."
             )
 
         else:
